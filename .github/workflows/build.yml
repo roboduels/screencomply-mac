@@ -31,6 +31,9 @@ jobs:
             --add-data "logo.icns:." \
             app.py
 
+      - name: Ad-hoc sign .app
+        run: codesign --force --deep --sign - dist/ScreenComply.app
+
       - name: Create DMG
         run: |
           hdiutil create \
