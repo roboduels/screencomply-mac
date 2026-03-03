@@ -8,6 +8,7 @@ import os
 import time
 import json
 import platform
+import webbrowser
 from datetime import datetime
 from PyQt5 import QtWidgets, QtGui, QtCore
 
@@ -151,10 +152,11 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
         self.logger = None
         self.api_client = None
         self.system_worker = None
+        self.meeting_url = None
 
         # Setup window
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
-        self.setFixedSize(500, 350)
+        self.setFixedSize(500, 440)
 
         # Set taskbar/dock icon — macOS uses .icns, Windows uses .ico
         if platform.system() == "Darwin":
@@ -167,7 +169,7 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
 
         # Center on screen
         screen = QtWidgets.QDesktopWidget().screenGeometry()
-        self.move((screen.width() - 500) // 2, (screen.height() - 350) // 2)
+        self.move((screen.width() - 500) // 2, (screen.height() - 440) // 2)
 
         # Main layout
         main_layout = QtWidgets.QVBoxLayout()
@@ -346,34 +348,36 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
         screen.setStyleSheet("background-color: #161b22;")
 
         layout = QtWidgets.QVBoxLayout(screen)
-        layout.setContentsMargins(40, 30, 40, 30)
-        layout.setSpacing(20)
+        layout.setContentsMargins(32, 20, 32, 20)
+        layout.setSpacing(10)
 
         # Brand
         brand = QtWidgets.QLabel("ScreenComply Lite")
         brand.setAlignment(QtCore.Qt.AlignCenter)
-        brand.setStyleSheet("font-size: 20px; font-weight: 600; color: #7ee7fc;")
+        brand.setStyleSheet("font-size: 18px; font-weight: 600; color: #7ee7fc;")
         layout.addWidget(brand)
 
         # LIVE indicator
         live_container = QtWidgets.QHBoxLayout()
-        live_container.setSpacing(12)
+        live_container.setSpacing(10)
+        live_container.setContentsMargins(0, 8, 0, 4)
 
-        # Pulsing dot
-        self.live_dot = QtWidgets.QLabel("●")
-        self.live_dot.setStyleSheet("color: #3fb950; font-size: 32px;")
+        # Pulsing dot — QFrame avoids unicode rendering issues
+        self.live_dot = QtWidgets.QFrame()
+        self.live_dot.setFixedSize(14, 14)
+        self.live_dot.setStyleSheet("background-color: #3fb950; border-radius: 7px;")
         live_container.addStretch()
         live_container.addWidget(self.live_dot)
 
         live_label = QtWidgets.QLabel("LIVE")
-        live_label.setStyleSheet("color: #3fb950; font-size: 36px; font-weight: 700; letter-spacing: 3px;")
+        live_label.setStyleSheet("color: #3fb950; font-size: 32px; font-weight: 700;")
         live_container.addWidget(live_label)
         live_container.addStretch()
 
         layout.addLayout(live_container)
 
         # Minimize hint
-        minimize_hint = QtWidgets.QLabel("(minimize this screen)")
+        minimize_hint = QtWidgets.QLabel("minimize this window to continue")
         minimize_hint.setAlignment(QtCore.Qt.AlignCenter)
         minimize_hint.setStyleSheet("font-size: 11px; color: #7d8590; font-style: italic;")
         layout.addWidget(minimize_hint)
@@ -381,16 +385,45 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
         # User email (will be set when monitoring starts)
         self.user_email_label = QtWidgets.QLabel("")
         self.user_email_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.user_email_label.setStyleSheet("font-size: 13px; color: #8b949e; margin-top: 10px;")
+        self.user_email_label.setStyleSheet("font-size: 13px; color: #8b949e;")
         layout.addWidget(self.user_email_label)
 
         # Instructions
         instructions = QtWidgets.QLabel("You may now proceed with your interview.\nKeep this window open until complete.")
         instructions.setAlignment(QtCore.Qt.AlignCenter)
-        instructions.setStyleSheet("font-size: 12px; color: #8b949e; line-height: 150%;")
+        instructions.setStyleSheet("font-size: 12px; color: #8b949e;")
         layout.addWidget(instructions)
 
         layout.addStretch()
+
+        # Join Meeting button
+        self.join_meeting_btn = QtWidgets.QPushButton("Fetching meeting link...")
+        self.join_meeting_btn.setEnabled(False)
+        self.join_meeting_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(31, 111, 235, 0.15);
+                color: #58a6ff;
+                border: 1px solid rgba(31, 111, 235, 0.4);
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: rgba(31, 111, 235, 0.3);
+                border: 1px solid rgba(31, 111, 235, 0.6);
+            }
+            QPushButton:pressed {
+                background-color: rgba(31, 111, 235, 0.4);
+            }
+            QPushButton:disabled {
+                background-color: rgba(139, 148, 158, 0.1);
+                color: #8b949e;
+                border: 1px solid rgba(139, 148, 158, 0.3);
+            }
+        """)
+        self.join_meeting_btn.clicked.connect(self._join_meeting)
+        layout.addWidget(self.join_meeting_btn)
 
         # Close Session button
         self.close_session_btn = QtWidgets.QPushButton("Close Session")
@@ -460,6 +493,15 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
         )
         self.api_client.register_session()
 
+        # Fetch meeting URL and update button
+        self.meeting_url = self.api_client.get_meeting_url()
+        if self.meeting_url:
+            self.join_meeting_btn.setText("Join Meeting →")
+            self.join_meeting_btn.setEnabled(True)
+        else:
+            self.join_meeting_btn.setText("No meeting scheduled")
+            self.join_meeting_btn.setEnabled(False)
+
         # Start background system integrity worker (5 seconds)
         self.system_worker = SystemIntegrityWorker(logger=self.logger, interval=5.0)
         self.system_worker.start()
@@ -488,12 +530,17 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
         print(f"  Monitoring every 5 seconds")
         print(f"  Heartbeat every 30 seconds")
 
+    def _join_meeting(self):
+        """Open the meeting URL in the default browser."""
+        if self.meeting_url:
+            webbrowser.open(self.meeting_url)
+
     def _pulse_dot(self):
         """Pulse the live indicator."""
         if self._pulse_state:
-            self.live_dot.setStyleSheet("color: #3fb950; font-size: 32px;")
+            self.live_dot.setStyleSheet("background-color: #3fb950; border-radius: 7px;")
         else:
-            self.live_dot.setStyleSheet("color: rgba(63, 185, 80, 0.5); font-size: 32px;")
+            self.live_dot.setStyleSheet("background-color: rgba(63, 185, 80, 0.3); border-radius: 7px;")
         self._pulse_state = not self._pulse_state
 
     def _send_heartbeat(self):
@@ -510,7 +557,7 @@ class ScreenComplyLiteApp(QtWidgets.QMainWindow):
 
         self.close_session_btn.setEnabled(False)
         self.close_session_btn.setText("Uploading report...")
-        self.live_dot.setStyleSheet("color: #8b949e; font-size: 32px;")
+        self.live_dot.setStyleSheet("background-color: #8b949e; border-radius: 7px;")
         QtWidgets.QApplication.processEvents()
 
         self._shutdown_and_upload()

@@ -9,6 +9,7 @@ import requests
 from typing import Dict, Any
 
 HEARTBEAT_URL = "https://ocyyhutrtuyiahqieygd.supabase.co/functions/v1/session-heartbeat"
+GET_MEETING_URL = "https://ocyyhutrtuyiahqieygd.supabase.co/functions/v1/get-meeting-url"
 SUPABASE_ANON_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
     "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jeXlodXRydHV5aWFocWlleWdkIiwi"
@@ -87,6 +88,29 @@ class APIClient:
         except Exception as e:
             print(f"✗ Failed to end session: {e}")
             return False
+
+    def get_meeting_url(self) -> str | None:
+        """Fetch the meeting URL for this participant.
+
+        Returns:
+            Meeting URL string, or None if no meeting found
+        """
+        payload = {"email": self.user_email}
+        headers = {"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"}
+        try:
+            resp = requests.post(GET_MEETING_URL, json=payload, headers=headers, timeout=10)
+            if resp.status_code == 404:
+                print("✗ No upcoming meeting found for this email")
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            url = data.get("meeting_url")
+            name = data.get("candidate_name", "")
+            print(f"✓ Meeting URL fetched for {name}: {url}")
+            return url
+        except Exception as e:
+            print(f"✗ get_meeting_url failed: {e}")
+            return None
 
     def upload_session(self, summary: Dict[str, Any], session_folder: str):
         """Upload session data files to S3."""
